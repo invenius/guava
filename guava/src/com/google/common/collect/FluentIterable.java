@@ -144,6 +144,8 @@ public abstract class FluentIterable<E> implements Iterable<E> {
   /**
    * Returns a fluent iterable containing {@code elements} in the specified order.
    *
+   * <p>The returned iterable is an unmodifiable view of the input array.
+   *
    * <p><b>{@code Stream} equivalent:</b> {@code Stream.of(elements)} or {@code
    * Arrays.stream(elements)}.
    *
@@ -170,6 +172,102 @@ public abstract class FluentIterable<E> implements Iterable<E> {
   }
 
   /**
+   * Returns a fluent iterable that combines two iterables. The returned iterable has an iterator
+   * that traverses the elements in {@code a}, followed by the elements in {@code b}. The source
+   * iterators are not polled until necessary.
+   *
+   * <p>The returned iterable's iterator supports {@code remove()} when the corresponding input
+   * iterator supports it.
+   *
+   * @since 20.0
+   */
+  @Beta
+  @CheckReturnValue
+  public static <T> FluentIterable<T> concat(Iterable<? extends T> a, Iterable<? extends T> b) {
+    return concat(ImmutableList.of(a, b));
+  }
+
+  /**
+   * Returns a fluent iterable that combines three iterables. The returned iterable has an iterator
+   * that traverses the elements in {@code a}, followed by the elements in {@code b}, followed by
+   * the elements in {@code c}. The source iterators are not polled until necessary.
+   *
+   * <p>The returned iterable's iterator supports {@code remove()} when the corresponding input
+   * iterator supports it.
+   *
+   * @since 20.0
+   */
+  @Beta
+  @CheckReturnValue
+  public static <T> FluentIterable<T> concat(
+      Iterable<? extends T> a, Iterable<? extends T> b, Iterable<? extends T> c) {
+    return concat(ImmutableList.of(a, b, c));
+  }
+
+  /**
+   * Returns a fluent iterable that combines four iterables. The returned iterable has an iterator
+   * that traverses the elements in {@code a}, followed by the elements in {@code b}, followed by
+   * the elements in {@code c}, followed by the elements in {@code d}. The source iterators are not
+   * polled until necessary.
+   *
+   * <p>The returned iterable's iterator supports {@code remove()} when the corresponding input
+   * iterator supports it.
+   *
+   * @since 20.0
+   */
+  @Beta
+  @CheckReturnValue
+  public static <T> FluentIterable<T> concat(
+      Iterable<? extends T> a,
+      Iterable<? extends T> b,
+      Iterable<? extends T> c,
+      Iterable<? extends T> d) {
+    return concat(ImmutableList.of(a, b, c, d));
+  }
+
+  /**
+   * Returns a fluent iterable that combines several iterables. The returned iterable has an
+   * iterator that traverses the elements of each iterable in {@code inputs}. The input iterators
+   * are not polled until necessary.
+   *
+   * <p>The returned iterable's iterator supports {@code remove()} when the corresponding input
+   * iterator supports it.
+   *
+   * @throws NullPointerException if any of the provided iterables is {@code null}
+   *
+   * @since 20.0
+   */
+  @Beta
+  @CheckReturnValue
+  public static <T> FluentIterable<T> concat(Iterable<? extends T>... inputs) {
+    return concat(ImmutableList.copyOf(inputs));
+  }
+
+  /**
+   * Returns a fluent iterable that combines several iterables. The returned iterable has an
+   * iterator that traverses the elements of each iterable in {@code inputs}. The input iterators
+   * are not polled until necessary.
+   *
+   * <p>The returned iterable's iterator supports {@code remove()} when the corresponding input
+   * iterator supports it. The methods of the returned iterable may throw
+   * {@code NullPointerException} if any of the input iterators is {@code null}.
+   *
+   * @since 20.0
+   */
+  @Beta
+  @CheckReturnValue
+  public static <T> FluentIterable<T> concat(
+      final Iterable<? extends Iterable<? extends T>> inputs) {
+    checkNotNull(inputs);
+    return new FluentIterable<T>() {
+      @Override
+      public Iterator<T> iterator() {
+        return Iterators.concat(Iterables.transform(inputs, Iterables.<T>toIterator()).iterator());
+      }
+    };
+  }
+
+  /**
    * Returns a fluent iterable containing no elements.
    *
    * <p><b>{@code Stream} equivalent:</b> {@code Stream.empty()}.
@@ -185,14 +283,18 @@ public abstract class FluentIterable<E> implements Iterable<E> {
   /**
    * Returns a fluent iterable containing {@code elements} in the specified order.
    *
+   * <p>The returned iterable is modifiable, but modifications do not affect the input array.
+   *
    * <p><b>{@code Stream} equivalent:</b> {@code Stream.of(elements)} or {@code
    * Arrays.stream(elements)}.
    *
+   * @deprecated Use {@link #from(E[])} instead (but note the differences in mutability). This
+   *     method will be removed in Guava release 21.0.
    * @since 18.0
    */
   @Beta
   @CheckReturnValue
-  // TODO(kak): @deprecated Use {@link #from(E[])} instead.
+  @Deprecated
   public static <E> FluentIterable<E> of(E[] elements) {
     return from(Lists.newArrayList(elements));
   }
@@ -281,7 +383,7 @@ public abstract class FluentIterable<E> implements Iterable<E> {
   @Beta
   @CheckReturnValue
   public final FluentIterable<E> append(Iterable<? extends E> other) {
-    return from(Iterables.concat(iterable, other));
+    return from(FluentIterable.concat(iterable, other));
   }
 
   /**
@@ -295,7 +397,7 @@ public abstract class FluentIterable<E> implements Iterable<E> {
   @Beta
   @CheckReturnValue
   public final FluentIterable<E> append(E... elements) {
-    return from(Iterables.concat(iterable, Arrays.asList(elements)));
+    return from(FluentIterable.concat(iterable, Arrays.asList(elements)));
   }
 
   /**
@@ -324,7 +426,7 @@ public abstract class FluentIterable<E> implements Iterable<E> {
    *   @SuppressWarnings("unchecked") // safe by runtime check
    *   Stream<MyType> result = (Stream) stream.filter(e -> e instanceof MyType);}</pre>
    */
-  @GwtIncompatible("Class.isInstance")
+  @GwtIncompatible // Class.isInstance
   @CheckReturnValue
   public final <T> FluentIterable<T> filter(Class<T> type) {
     return from(Iterables.filter(iterable, type));
@@ -397,7 +499,7 @@ public abstract class FluentIterable<E> implements Iterable<E> {
   @CheckReturnValue
   public <T> FluentIterable<T> transformAndConcat(
       Function<? super E, ? extends Iterable<? extends T>> function) {
-    return from(Iterables.concat(transform(function)));
+    return from(FluentIterable.concat(transform(function)));
   }
 
   /**
@@ -682,7 +784,7 @@ public abstract class FluentIterable<E> implements Iterable<E> {
    * @return a newly-allocated array into which all the elements of this fluent iterable have
    *     been copied
    */
-  @GwtIncompatible("Array.newArray(Class, int)")
+  @GwtIncompatible // Array.newArray(Class, int)
   @CheckReturnValue
   public final E[] toArray(Class<E> type) {
     return Iterables.toArray(iterable, type);

@@ -18,6 +18,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.Thread.currentThread;
 import static java.util.Arrays.asList;
 
+import com.google.common.annotations.GwtIncompatible;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.collect.Ordering;
@@ -42,6 +43,7 @@ import javax.annotation.Nullable;
 /**
  * Static methods used to implement {@link Futures#getChecked(Future, Class)}.
  */
+@GwtIncompatible
 final class FuturesGetChecked {
   static <V, X extends Exception> V getChecked(Future<V> future, Class<X> exceptionClass) throws X {
     return getChecked(bestGetCheckedTypeValidator(), future, exceptionClass);
@@ -100,7 +102,6 @@ final class FuturesGetChecked {
   }
 
   @J2ObjCIncompatible // ClassValue
-  @SuppressUnderAndroid // ClassValue
   @VisibleForTesting
   static GetCheckedTypeValidator classValueValidator() {
     return GetCheckedTypeValidatorHolder.ClassValueValidator.INSTANCE;
@@ -121,7 +122,6 @@ final class FuturesGetChecked {
 
     @IgnoreJRERequirement // getChecked falls back to another implementation if necessary
     @J2ObjCIncompatible // ClassValue
-    @SuppressUnderAndroid // ClassValue
     enum ClassValueValidator implements GetCheckedTypeValidator {
       INSTANCE;
 

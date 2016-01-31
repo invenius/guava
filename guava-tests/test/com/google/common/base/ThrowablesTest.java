@@ -515,16 +515,15 @@ public class ThrowablesTest extends TestCase {
     }
   }
 
-  @SuppressWarnings("CheckReturnValue")
   public void testGetCasualChainNull() {
     try {
-      Throwables.getCausalChain(null);
+      List<Throwable> unused = Throwables.getCausalChain(null);
       fail("Should have throw NPE");
     } catch (NullPointerException expected) {
     }
   }
 
-  @SuppressUnderAndroid // No getJavaLangAccess in Android (at least not in the version we use).
+  @AndroidIncompatible // No getJavaLangAccess in Android (at least not in the version we use).
   public void testLazyStackTraceWorksInProd() {
     // Obviously this isn't guaranteed in every environment, but it works well enough for now:
     assertTrue(lazyStackTraceIsLazy());

@@ -159,6 +159,10 @@ public final class Iterables {
    * Removes, from an iterable, every element that satisfies the provided
    * predicate.
    *
+   * <p>Removals may or may not happen immediately as each element is tested
+   * against the predicate.  The behavior of this method is not specified if
+   * {@code predicate} is dependent on {@code removeFrom}.
+   *
    * @param removeFrom the iterable to (potentially) remove elements from
    * @param predicate a predicate that determines whether an element should
    *     be removed
@@ -177,8 +181,10 @@ public final class Iterables {
 
   private static <T> boolean removeIfFromRandomAccessList(
       List<T> list, Predicate<? super T> predicate) {
-    // Note: Not all random access lists support set() so we need to deal with
-    // those that don't and attempt the slower remove() based solution.
+    // Note: Not all random access lists support set(). Additionally, it's possible
+    // for a list to reject setting an element, such as when the list does not permit
+    // duplicate elements. For both of those cases,  we need to fall back to a slower
+    // implementation.
     int from = 0;
     int to = 0;
 
@@ -189,6 +195,9 @@ public final class Iterables {
           try {
             list.set(to, element);
           } catch (UnsupportedOperationException e) {
+            slowRemoveIfForRemainingElements(list, predicate, to, from);
+            return true;
+          } catch (IllegalArgumentException e) {
             slowRemoveIfForRemainingElements(list, predicate, to, from);
             return true;
           }
@@ -304,15 +313,13 @@ public final class Iterables {
    * @return a newly-allocated array into which all the elements of the iterable
    *     have been copied
    */
-  @GwtIncompatible("Array.newInstance(Class, int)")
+  @GwtIncompatible // Array.newInstance(Class, int)
   public static <T> T[] toArray(Iterable<? extends T> iterable, Class<T> type) {
-    Collection<? extends T> collection = toCollection(iterable);
-    T[] array = ObjectArrays.newArray(type, collection.size());
-    return collection.toArray(array);
+    return toArray(iterable, ObjectArrays.newArray(type, 0));
   }
 
   static <T> T[] toArray(Iterable<? extends T> iterable, T[] array) {
-    Collection<? extends T> collection = toCollection(iterable);
+    Collection<? extends T> collection = castOrCopyToCollection(iterable);
     return collection.toArray(array);
   }
 
@@ -324,7 +331,7 @@ public final class Iterables {
    *     have been copied
    */
   static Object[] toArray(Iterable<?> iterable) {
-    return toCollection(iterable).toArray();
+    return castOrCopyToCollection(iterable).toArray();
   }
 
   /**
@@ -332,7 +339,7 @@ public final class Iterables {
    * collection, it is returned. Otherwise, an {@link java.util.ArrayList} is
    * created with the contents of the iterable in the same iteration order.
    */
-  private static <E> Collection<E> toCollection(Iterable<E> iterable) {
+  private static <E> Collection<E> castOrCopyToCollection(Iterable<E> iterable) {
     return (iterable instanceof Collection)
         ? (Collection<E>) iterable
         : Lists.newArrayList(iterable.iterator());
@@ -431,7 +438,7 @@ public final class Iterables {
    * corresponding input iterator supports it.
    */
   public static <T> Iterable<T> concat(Iterable<? extends T> a, Iterable<? extends T> b) {
-    return concat(ImmutableList.of(a, b));
+    return FluentIterable.concat(a, b);
   }
 
   /**
@@ -445,7 +452,7 @@ public final class Iterables {
    */
   public static <T> Iterable<T> concat(
       Iterable<? extends T> a, Iterable<? extends T> b, Iterable<? extends T> c) {
-    return concat(ImmutableList.of(a, b, c));
+    return FluentIterable.concat(a, b, c);
   }
 
   /**
@@ -463,7 +470,7 @@ public final class Iterables {
       Iterable<? extends T> b,
       Iterable<? extends T> c,
       Iterable<? extends T> d) {
-    return concat(ImmutableList.of(a, b, c, d));
+    return FluentIterable.concat(a, b, c, d);
   }
 
   /**
@@ -490,28 +497,8 @@ public final class Iterables {
    * iterable may throw {@code NullPointerException} if any of the input
    * iterators is null.
    */
-  public static <T> Iterable<T> concat(final Iterable<? extends Iterable<? extends T>> inputs) {
-    checkNotNull(inputs);
-    return new FluentIterable<T>() {
-      @Override
-      public Iterator<T> iterator() {
-        return Iterators.concat(iterators(inputs));
-      }
-    };
-  }
-
-  /**
-   * Returns an iterator over the iterators of the given iterables.
-   */
-  private static <T> Iterator<Iterator<? extends T>> iterators(
-      Iterable<? extends Iterable<? extends T>> iterables) {
-    return new TransformedIterator<Iterable<? extends T>, Iterator<? extends T>>(
-        iterables.iterator()) {
-      @Override
-      Iterator<? extends T> transform(Iterable<? extends T> from) {
-        return from.iterator();
-      }
-    };
+  public static <T> Iterable<T> concat(Iterable<? extends Iterable<? extends T>> inputs) {
+    return FluentIterable.concat(inputs);
   }
 
   /**
@@ -599,7 +586,7 @@ public final class Iterables {
    * @return an unmodifiable iterable containing all elements of the original
    *     iterable that were of the requested type
    */
-  @GwtIncompatible("Class.isInstance")
+  @GwtIncompatible // Class.isInstance
   @CheckReturnValue
   public static <T> Iterable<T> filter(final Iterable<?> unfiltered, final Class<T> desiredType) {
     checkNotNull(unfiltered);
@@ -1008,7 +995,7 @@ public final class Iterables {
 
   // TODO(user): Is this the best place for this? Move to fluent functions?
   // Useful as a public method?
-  private static <T> Function<Iterable<? extends T>, Iterator<? extends T>> toIterator() {
+  static <T> Function<Iterable<? extends T>, Iterator<? extends T>> toIterator() {
     return new Function<Iterable<? extends T>, Iterator<? extends T>>() {
       @Override
       public Iterator<? extends T> apply(Iterable<? extends T> iterable) {

@@ -30,6 +30,7 @@ import static java.math.RoundingMode.HALF_UP;
 import com.google.common.annotations.GwtCompatible;
 import com.google.common.annotations.GwtIncompatible;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.primitives.Ints;
 
 import java.math.BigInteger;
 import java.math.RoundingMode;
@@ -123,7 +124,7 @@ public final class IntMath {
    * @throws ArithmeticException if {@code mode} is {@link RoundingMode#UNNECESSARY} and {@code x}
    *         is not a power of ten
    */
-  @GwtIncompatible("need BigIntegerMath to adequately test")
+  @GwtIncompatible // need BigIntegerMath to adequately test
   @SuppressWarnings("fallthrough")
   public static int log10(int x, RoundingMode mode) {
     checkPositive("x", x);
@@ -185,7 +186,7 @@ public final class IntMath {
    *
    * @throws IllegalArgumentException if {@code k < 0}
    */
-  @GwtIncompatible("failing tests")
+  @GwtIncompatible // failing tests
   public static int pow(int b, int k) {
     checkNonNegative("exponent", k);
     switch (b) {
@@ -226,7 +227,7 @@ public final class IntMath {
    * @throws ArithmeticException if {@code mode} is {@link RoundingMode#UNNECESSARY} and
    *         {@code sqrt(x)} is not an integer
    */
-  @GwtIncompatible("need BigIntegerMath to adequately test")
+  @GwtIncompatible // need BigIntegerMath to adequately test
   @SuppressWarnings("fallthrough")
   public static int sqrt(int x, RoundingMode mode) {
     checkNonNegative("x", x);
@@ -485,6 +486,88 @@ public final class IntMath {
     }
   }
 
+  /**
+   * Returns the sum of {@code a} and {@code b} unless it would overflow or underflow in which case
+   * {@code Integer.MAX_VALUE} or {@code Integer.MIN_VALUE} is returned, respectively.
+   *
+   * @since 20.0
+   */
+  public static int saturatedAdd(int a, int b) {
+    return Ints.saturatedCast((long) a + b);
+  }
+
+  /**
+   * Returns the difference of {@code a} and {@code b} unless it would overflow or underflow in
+   * which case {@code Integer.MAX_VALUE} or {@code Integer.MIN_VALUE} is returned, respectively.
+   *
+   * @since 20.0
+   */
+  public static int saturatedSubtract(int a, int b) {
+    return Ints.saturatedCast((long) a - b);
+  }
+
+  /**
+   * Returns the product of {@code a} and {@code b} unless it would overflow or underflow in
+   * which case {@code Integer.MAX_VALUE} or {@code Integer.MIN_VALUE} is returned, respectively.
+   *
+   * @since 20.0
+   */
+  public static int saturatedMultiply(int a, int b) {
+    return Ints.saturatedCast((long) a * b);
+  }
+
+  /**
+   * Returns the {@code b} to the {@code k}th power, unless it would overflow or underflow in
+   * which case {@code Integer.MAX_VALUE} or {@code Integer.MIN_VALUE} is returned, respectively.
+   *
+   * @since 20.0
+   */
+  public static int saturatedPow(int b, int k) {
+    checkNonNegative("exponent", k);
+    switch (b) {
+      case 0:
+        return (k == 0) ? 1 : 0;
+      case 1:
+        return 1;
+      case (-1):
+        return ((k & 1) == 0) ? 1 : -1;
+      case 2:
+        if (k >= Integer.SIZE - 1) {
+          return Integer.MAX_VALUE;
+        }
+        return 1 << k;
+      case (-2):
+        if (k >= Integer.SIZE) {
+          return Integer.MAX_VALUE + (k & 1);
+        }
+        return ((k & 1) == 0) ? 1 << k : -1 << k;
+      default:
+        // continue below to handle the general case
+    }
+    int accum = 1;
+    // if b is negative and k is odd then the limit is MIN otherwise the limit is MAX
+    int limit = Integer.MAX_VALUE + ((b >>> Integer.SIZE - 1) & (k & 1));
+    while (true) {
+      switch (k) {
+        case 0:
+          return accum;
+        case 1:
+          return saturatedMultiply(accum, b);
+        default:
+          if ((k & 1) != 0) {
+            accum = saturatedMultiply(accum, b);
+          }
+          k >>= 1;
+          if (k > 0) {
+            if (-FLOOR_SQRT_MAX_INT > b | b > FLOOR_SQRT_MAX_INT) {
+              return limit;
+            }
+            b *= b;
+          }
+      }
+    }
+  }
+
   @VisibleForTesting static final int FLOOR_SQRT_MAX_INT = 46340;
 
   /**
@@ -520,7 +603,7 @@ public final class IntMath {
    *
    * @throws IllegalArgumentException if {@code n < 0}, {@code k < 0} or {@code k > n}
    */
-  @GwtIncompatible("need BigIntegerMath to adequately test")
+  @GwtIncompatible // need BigIntegerMath to adequately test
   public static int binomial(int n, int k) {
     checkNonNegative("n", n);
     checkNonNegative("k", k);

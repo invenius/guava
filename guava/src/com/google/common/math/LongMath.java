@@ -122,7 +122,7 @@ public final class LongMath {
    * @throws ArithmeticException if {@code mode} is {@link RoundingMode#UNNECESSARY} and {@code x}
    *         is not a power of ten
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   @SuppressWarnings("fallthrough")
   // TODO(kevinb): remove after this warning is disabled globally
   public static int log10(long x, RoundingMode mode) {
@@ -149,7 +149,7 @@ public final class LongMath {
     }
   }
 
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   static int log10Floor(long x) {
     /*
      * Based on Hacker's Delight Fig. 11-5, the two-table-lookup, branch-free implementation.
@@ -172,7 +172,7 @@ public final class LongMath {
       12, 12, 11, 11, 11, 10, 10, 10, 9, 9, 9, 9, 8, 8, 8, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5, 4, 4, 4,
       3, 3, 3, 3, 2, 2, 2, 1, 1, 1, 0, 0, 0 };
 
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   @VisibleForTesting
   static final long[] powersOf10 = {
     1L,
@@ -197,7 +197,7 @@ public final class LongMath {
   };
 
   // halfPowersOf10[i] = largest long less than 10^(i + 0.5)
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   @VisibleForTesting
   static final long[] halfPowersOf10 = {
     3L,
@@ -228,7 +228,7 @@ public final class LongMath {
    *
    * @throws IllegalArgumentException if {@code k < 0}
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   public static long pow(long b, int k) {
     checkNonNegative("exponent", k);
     if (-2 <= b && b <= 2) {
@@ -271,7 +271,7 @@ public final class LongMath {
    * @throws ArithmeticException if {@code mode} is {@link RoundingMode#UNNECESSARY} and
    *         {@code sqrt(x)} is not an integer
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   @SuppressWarnings("fallthrough")
   public static long sqrt(long x, RoundingMode mode) {
     checkNonNegative("x", x);
@@ -343,7 +343,7 @@ public final class LongMath {
    * @throws ArithmeticException if {@code q == 0}, or if {@code mode == UNNECESSARY} and {@code a}
    *         is not an integer multiple of {@code b}
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   @SuppressWarnings("fallthrough")
   public static long divide(long p, long q, RoundingMode mode) {
     checkNotNull(mode);
@@ -416,7 +416,7 @@ public final class LongMath {
    * @see <a href="http://docs.oracle.com/javase/specs/jls/se7/html/jls-15.html#jls-15.17.3">
    *      Remainder Operator</a>
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   public static int mod(long x, int m) {
     // Cast is safe because the result is guaranteed in the range [0, m)
     return (int) mod(x, (long) m);
@@ -440,7 +440,7 @@ public final class LongMath {
    * @see <a href="http://docs.oracle.com/javase/specs/jls/se7/html/jls-15.html#jls-15.17.3">
    *      Remainder Operator</a>
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   public static long mod(long x, long m) {
     if (m <= 0) {
       throw new ArithmeticException("Modulus must be positive");
@@ -505,7 +505,7 @@ public final class LongMath {
    *
    * @throws ArithmeticException if {@code a + b} overflows in signed {@code long} arithmetic
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   public static long checkedAdd(long a, long b) {
     long result = a + b;
     checkNoOverflow((a ^ b) < 0 | (a ^ result) >= 0);
@@ -517,7 +517,7 @@ public final class LongMath {
    *
    * @throws ArithmeticException if {@code a - b} overflows in signed {@code long} arithmetic
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   public static long checkedSubtract(long a, long b) {
     long result = a - b;
     checkNoOverflow((a ^ b) >= 0 | (a ^ result) >= 0);
@@ -529,7 +529,7 @@ public final class LongMath {
    *
    * @throws ArithmeticException if {@code a * b} overflows in signed {@code long} arithmetic
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   public static long checkedMultiply(long a, long b) {
     // Hacker's Delight, Section 2-12
     int leadingZeros = Long.numberOfLeadingZeros(a) + Long.numberOfLeadingZeros(~a)
@@ -560,7 +560,7 @@ public final class LongMath {
    * @throws ArithmeticException if {@code b} to the {@code k}th power overflows in signed
    *         {@code long} arithmetic
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   public static long checkedPow(long b, int k) {
     checkNonNegative("exponent", k);
     if (b >= -2 & b <= 2) {
@@ -601,6 +601,123 @@ public final class LongMath {
     }
   }
 
+  /**
+   * Returns the sum of {@code a} and {@code b} unless it would overflow or underflow in which case
+   * {@code Long.MAX_VALUE} or {@code Long.MIN_VALUE} is returned, respectively.
+   *
+   * @since 20.0
+   */
+  public static long saturatedAdd(long a, long b) {
+    long naiveSum = a + b;
+    if ((a ^ b) < 0 | (a ^ naiveSum) >= 0) {
+      // If a and b have different signs or a has the same sign as the result then there was no
+      // overflow, return.
+      return naiveSum;
+    }
+    // we did over/under flow, if the sign is negative we should return MAX otherwise MIN
+    return Long.MAX_VALUE + ((naiveSum >>> (Long.SIZE - 1)) ^ 1);
+  }
+
+  /**
+   * Returns the difference of {@code a} and {@code b} unless it would overflow or underflow in
+   * which case {@code Long.MAX_VALUE} or {@code Long.MIN_VALUE} is returned, respectively.
+   *
+   * @since 20.0
+   */
+  public static long saturatedSubtract(long a, long b) {
+    long naiveDifference = a - b;
+    if ((a ^ b) >= 0 | (a ^ naiveDifference) >= 0) {
+      // If a and b have the same signs or a has the same sign as the result then there was no
+      // overflow, return.
+      return naiveDifference;
+    }
+    // we did over/under flow
+    return Long.MAX_VALUE + ((naiveDifference >>> (Long.SIZE - 1)) ^ 1);
+  }
+
+  /**
+   * Returns the product of {@code a} and {@code b} unless it would overflow or underflow in
+   * which case {@code Long.MAX_VALUE} or {@code Long.MIN_VALUE} is returned, respectively.
+   *
+   * @since 20.0
+   */
+  public static long saturatedMultiply(long a, long b) {
+    // see checkedMultiply for explanation
+    int leadingZeros =
+        Long.numberOfLeadingZeros(a)
+            + Long.numberOfLeadingZeros(~a)
+            + Long.numberOfLeadingZeros(b)
+            + Long.numberOfLeadingZeros(~b);
+    if (leadingZeros > Long.SIZE + 1) {
+      return a * b;
+    }
+    // the return value if we will overflow (which we calculate by overflowing a long :) )
+    long limit = Long.MAX_VALUE + ((a ^ b) >>> (Long.SIZE - 1));
+    if (leadingZeros < Long.SIZE | (a < 0 & b == Long.MIN_VALUE)) {
+      // overflow
+      return limit;
+    }
+    long result = a * b;
+    if (a == 0 || result / a == b) {
+      return result;
+    }
+    return limit;
+  }
+
+  /**
+   * Returns the {@code b} to the {@code k}th power, unless it would overflow or underflow in
+   * which case {@code Long.MAX_VALUE} or {@code Long.MIN_VALUE} is returned, respectively.
+   *
+   * @since 20.0
+   */
+  public static long saturatedPow(long b, int k) {
+    checkNonNegative("exponent", k);
+    if (b >= -2 & b <= 2) {
+      switch ((int) b) {
+        case 0:
+          return (k == 0) ? 1 : 0;
+        case 1:
+          return 1;
+        case (-1):
+          return ((k & 1) == 0) ? 1 : -1;
+        case 2:
+          if (k >= Long.SIZE - 1) {
+            return Long.MAX_VALUE;
+          }
+          return 1L << k;
+        case (-2):
+          if (k >= Long.SIZE) {
+            return Long.MAX_VALUE + (k & 1);
+          }
+          return ((k & 1) == 0) ? (1L << k) : (-1L << k);
+        default:
+          throw new AssertionError();
+      }
+    }
+    long accum = 1;
+    // if b is negative and k is odd then the limit is MIN otherwise the limit is MAX
+    long limit = Long.MAX_VALUE + ((b >>> Long.SIZE - 1) & (k & 1));
+    while (true) {
+      switch (k) {
+        case 0:
+          return accum;
+        case 1:
+          return saturatedMultiply(accum, b);
+        default:
+          if ((k & 1) != 0) {
+            accum = saturatedMultiply(accum, b);
+          }
+          k >>= 1;
+          if (k > 0) {
+            if (-FLOOR_SQRT_MAX_LONG > b | b > FLOOR_SQRT_MAX_LONG) {
+              return limit;
+            }
+            b *= b;
+          }
+      }
+    }
+  }
+
   @VisibleForTesting static final long FLOOR_SQRT_MAX_LONG = 3037000499L;
 
   /**
@@ -610,7 +727,7 @@ public final class LongMath {
    *
    * @throws IllegalArgumentException if {@code n < 0}
    */
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   public static long factorial(int n) {
     checkNonNegative("n", n);
     return (n < factorials.length) ? factorials[n] : Long.MAX_VALUE;
@@ -834,7 +951,7 @@ public final class LongMath {
         long bLo = b & 0xFFFFFFFFL; // < 2^32
 
         /*
-         * a * b == aHi * bHi * 2^64 + (aHi * bLo + aLo * bHi) * 2^63 + aLo * bLo.
+         * a * b == aHi * bHi * 2^64 + (aHi * bLo + aLo * bHi) * 2^32 + aLo * bLo.
          *       == (aHi * bHi * 2^32 + aHi * bLo + aLo * bHi) * 2^32 + aLo * bLo
          *
          * We carry out this computation in modular arithmetic.  Since times2ToThe32Mod accepts

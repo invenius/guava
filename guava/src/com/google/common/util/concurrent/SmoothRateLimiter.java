@@ -19,10 +19,12 @@ package com.google.common.util.concurrent;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
+import com.google.common.annotations.GwtIncompatible;
 import com.google.common.math.LongMath;
 
 import java.util.concurrent.TimeUnit;
 
+@GwtIncompatible
 abstract class SmoothRateLimiter extends RateLimiter {
   /*
    * How is the RateLimiter designed, and why?
@@ -357,11 +359,7 @@ abstract class SmoothRateLimiter extends RateLimiter {
     long waitMicros = storedPermitsToWaitTime(this.storedPermits, storedPermitsToSpend)
         + (long) (freshPermits * stableIntervalMicros);
 
-    try {
-      this.nextFreeTicketMicros = LongMath.checkedAdd(nextFreeTicketMicros, waitMicros);
-    } catch (ArithmeticException e) {
-      this.nextFreeTicketMicros = Long.MAX_VALUE;
-    }
+    this.nextFreeTicketMicros = LongMath.saturatedAdd(nextFreeTicketMicros, waitMicros);
     this.storedPermits -= storedPermitsToSpend;
     return returnValue;
   }

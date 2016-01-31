@@ -41,7 +41,7 @@ import javax.annotation.Nullable;
  * @since 14.0
  */
 @Beta
-@GwtIncompatible("uses NavigableMap")
+@GwtIncompatible // uses NavigableMap
 public class TreeRangeSet<C extends Comparable<?>> extends AbstractRangeSet<C>
     implements Serializable {
 
@@ -119,6 +119,21 @@ public class TreeRangeSet<C extends Comparable<?>> extends AbstractRangeSet<C>
       // TODO(kevinb): revisit this design choice
       return null;
     }
+  }
+
+  @Override
+  public boolean intersects(Range<C> range) {
+    checkNotNull(range);
+    Entry<Cut<C>, Range<C>> ceilingEntry = rangesByLowerBound.ceilingEntry(range.lowerBound);
+    if (ceilingEntry != null
+        && ceilingEntry.getValue().isConnected(range)
+        && !ceilingEntry.getValue().intersection(range).isEmpty()) {
+      return true;
+    }
+    Entry<Cut<C>, Range<C>> priorEntry = rangesByLowerBound.lowerEntry(range.lowerBound);
+    return priorEntry != null
+        && priorEntry.getValue().isConnected(range)
+        && !priorEntry.getValue().intersection(range).isEmpty();
   }
 
   @Override

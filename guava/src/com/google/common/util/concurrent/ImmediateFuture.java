@@ -83,7 +83,6 @@ abstract class ImmediateFuture<V> implements ListenableFuture<V> {
   static class ImmediateSuccessfulFuture<V> extends ImmediateFuture<V> {
     static final ImmediateSuccessfulFuture<Object> NULL =
         new ImmediateSuccessfulFuture<Object>(null);
-
     @Nullable private final V value;
 
     ImmediateSuccessfulFuture(@Nullable V value) {
@@ -96,7 +95,7 @@ abstract class ImmediateFuture<V> implements ListenableFuture<V> {
     }
   }
 
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   static class ImmediateSuccessfulCheckedFuture<V, X extends Exception> extends ImmediateFuture<V>
       implements CheckedFuture<V, X> {
     @Nullable private final V value;
@@ -135,7 +134,7 @@ abstract class ImmediateFuture<V> implements ListenableFuture<V> {
     }
   }
 
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   static class ImmediateCancelledFuture<V> extends ImmediateFuture<V> {
     private final CancellationException thrown;
 
@@ -154,7 +153,7 @@ abstract class ImmediateFuture<V> implements ListenableFuture<V> {
     }
   }
 
-  @GwtIncompatible("TODO")
+  @GwtIncompatible // TODO
   static class ImmediateFailedCheckedFuture<V, X extends Exception> extends ImmediateFuture<V>
       implements CheckedFuture<V, X> {
     private final X thrown;

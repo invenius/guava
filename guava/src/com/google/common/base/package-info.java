@@ -18,7 +18,7 @@
  * Basic utility libraries and interfaces.
  *
  * <p>This package is a part of the open-source
- * <a href="http://guava-libraries.googlecode.com">Guava libraries</a>.
+ * <a href="http://github.com/google/guava">Guava</a> library.
  *
  * <h2>Contents</h2>
  *
@@ -60,7 +60,9 @@
  * </ul>
  *
  */
+@CheckReturnValue
 @ParametersAreNonnullByDefault
 package com.google.common.base;
 
+import javax.annotation.CheckReturnValue;
 import javax.annotation.ParametersAreNonnullByDefault;

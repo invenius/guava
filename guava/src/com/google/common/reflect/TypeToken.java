@@ -45,7 +45,6 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nullable;
 
@@ -400,72 +399,8 @@ public abstract class TypeToken<T> extends TypeCapture<T> implements Serializabl
         "%s isn't a subclass of %s", subclass, this);
     Type resolvedTypeArgs = resolveTypeArgsForSubclass(subclass);
     @SuppressWarnings("unchecked") // guarded by the isAssignableFrom() statement above
-    TypeToken<? extends T> subtype = (TypeToken<? extends T>)
-        of(replaceTypeVariablesWithWildcard(resolvedTypeArgs, subclass));
+    TypeToken<? extends T> subtype = (TypeToken<? extends T>) of(resolvedTypeArgs);
     return subtype;
-  }
-
-  private static final Type replaceTypeVariablesWithWildcard(
-      Type type, final Class<?> declaringClass) {
-    checkNotNull(declaringClass);
-    final AtomicReference<Type> result = new AtomicReference<Type>();
-    result.set(type);
-    new TypeVisitor() {
-      @Override void visitTypeVariable(TypeVariable<?> var) {
-        if (var.getGenericDeclaration() == declaringClass) {
-          result.set(Types.subtypeOf(Object.class));
-        }
-      }
-      @Override void visitParameterizedType(ParameterizedType pt) {
-        result.set(Types.newParameterizedTypeWithOwner(
-            // Replaces type vars on the owner type if it's owner type of declaringClass.
-            declaringClass.getEnclosingClass() == null
-                ? pt.getOwnerType()
-                : replaceTypeVariablesWithWildcard(
-                    pt.getOwnerType(), declaringClass.getEnclosingClass()),
-            (Class<?>) pt.getRawType(),
-            replaceTypeVariablesWithWildcard(pt.getActualTypeArguments(), declaringClass)));
-      }
-      @Override void visitWildcardType(WildcardType t) {}
-      @Override void visitGenericArrayType(GenericArrayType t) {}
-      @Override void visitClass(Class<?> t) {}
-    }.visit(type);
-    return result.get();
-  }
-
-  private static final Type[] replaceTypeVariablesWithWildcard(
-      Type[] types, Class<?> declaringClass) {
-    Type[] result = new Type[types.length];
-    for (int i = 0; i < types.length; i++) {
-      result[i] = replaceTypeVariablesWithWildcard(types[i], declaringClass);
-    }
-    return result;
-  }
-
-  /**
-   * Returns true if this type is a supertype of the given {@code type}. "Supertype" is defined
-   * according to <a href="http://docs.oracle.com/javase/specs/jls/se8/html/jls-4.html#jls-4.5.1"
-   * >the rules for type arguments</a> introduced with Java generics.
-   *
-   * @deprecated Use the method under its new name, {@link #isSupertypeOf(TypeToken)}. This method
-   *     will be removed in Guava release 20.0.
-   */
-  @Deprecated
-  public final boolean isAssignableFrom(TypeToken<?> type) {
-    return isSupertypeOf(type);
-  }
-
-  /**
-   * Returns true if this type is a supertype of the given {@code type}. "Supertype" is defined
-   * according to <a href="http://docs.oracle.com/javase/specs/jls/se8/html/jls-4.html#jls-4.5.1"
-   * >the rules for type arguments</a> introduced with Java generics.
-   *
-   * @deprecated Use the method under its new name, {@link #isSupertypeOf(Type)}. This method will
-   *     be removed in Guava release 20.0.
-   */
-  @Deprecated
-  public final boolean isAssignableFrom(Type type) {
-    return isSupertypeOf(type);
   }
 
   /**
@@ -1206,7 +1141,7 @@ public abstract class TypeToken<T> extends TypeCapture<T> implements Serializabl
 
     /** Collects all types to map, and returns the total depth from T up to Object. */
     private int collectTypes(K type, Map<? super K, Integer> map) {
-      Integer existing = map.get(this);
+      Integer existing = map.get(type);
       if (existing != null) {
         // short circuit: if set contains type it already contains its supertypes
         return existing;

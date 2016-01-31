@@ -25,7 +25,6 @@ import com.google.common.annotations.GwtCompatible;
 import java.io.Serializable;
 import java.util.Map;
 
-import javax.annotation.CheckReturnValue;
 import javax.annotation.Nullable;
 
 /**
@@ -42,7 +41,6 @@ import javax.annotation.Nullable;
  * @since 2.0
  */
 @GwtCompatible
-@CheckReturnValue
 public final class Functions {
   private Functions() {}
 
@@ -53,6 +51,14 @@ public final class Functions {
    * <p><b>Warning:</b> The returned function may not be <i>consistent with equals</i> (as
    * documented at {@link Function#apply}). For example, this function yields different results for
    * the two equal instances {@code ImmutableSet.of(1, 2)} and {@code ImmutableSet.of(2, 1)}.
+   *
+   * <p><b>Warning:</b> as with all function types in this package, avoid depending on the specific
+   * {@code equals}, {@code hashCode} or {@code toString} behavior of the returned function. A
+   * future migration to {@code java.util.function} will not preserve this behavior.
+   *
+   * <p><b>For Java 8 users:</b> use the method reference {@code Object::toString} instead. In the
+   * future, when this class requires Java 8, this method will be deprecated. See {@link Function}
+   * for more important information about the Java 8 transition.
    */
   public static Function<Object, String> toStringFunction() {
     return ToStringFunction.INSTANCE;

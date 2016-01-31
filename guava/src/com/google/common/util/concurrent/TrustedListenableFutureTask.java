@@ -78,15 +78,16 @@ class TrustedListenableFutureTask<V> extends AbstractFuture.TrustedFuture<V>
     }
   }
 
-  @Override final void done() {
-    super.done();
+  @Override protected final void afterDone() {
+    super.afterDone();
 
     // Free all resources associated with the running task
     this.task = null;
   }
 
-  @GwtIncompatible("Interruption not supported")
-  @Override protected final void interruptTask() {
+  @GwtIncompatible // Interruption not supported
+  @Override
+  protected final void interruptTask() {
     TrustedFutureInterruptibleTask localTask = task;
     if (localTask != null) {
       localTask.interruptTask();
