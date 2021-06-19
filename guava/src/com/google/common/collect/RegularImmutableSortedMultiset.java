@@ -19,11 +19,11 @@ import static com.google.common.base.Preconditions.checkPositionIndexes;
 import static com.google.common.collect.BoundType.CLOSED;
 
 import com.google.common.annotations.GwtIncompatible;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
-
 import java.util.Comparator;
-
-import javax.annotation.Nullable;
+import java.util.function.ObjIntConsumer;
+import javax.annotation.CheckForNull;
 
 /**
  * An immutable sorted multiset with one or more distinct elements.
@@ -32,13 +32,14 @@ import javax.annotation.Nullable;
  */
 @SuppressWarnings("serial") // uses writeReplace, not default serialization
 @GwtIncompatible
+@ElementTypesAreNonnullByDefault
 final class RegularImmutableSortedMultiset<E> extends ImmutableSortedMultiset<E> {
   private static final long[] ZERO_CUMULATIVE_COUNTS = {0};
 
   static final ImmutableSortedMultiset<Comparable> NATURAL_EMPTY_MULTISET =
-      new RegularImmutableSortedMultiset<Comparable>(Ordering.natural());
+      new RegularImmutableSortedMultiset<>(Ordering.natural());
 
-  private final transient RegularImmutableSortedSet<E> elementSet;
+  @VisibleForTesting final transient RegularImmutableSortedSet<E> elementSet;
   private final transient long[] cumulativeCounts;
   private final transient int offset;
   private final transient int length;
@@ -68,17 +69,27 @@ final class RegularImmutableSortedMultiset<E> extends ImmutableSortedMultiset<E>
   }
 
   @Override
+  public void forEachEntry(ObjIntConsumer<? super E> action) {
+    checkNotNull(action);
+    for (int i = 0; i < length; i++) {
+      action.accept(elementSet.asList().get(i), getCount(i));
+    }
+  }
+
+  @Override
+  @CheckForNull
   public Entry<E> firstEntry() {
     return isEmpty() ? null : getEntry(0);
   }
 
   @Override
+  @CheckForNull
   public Entry<E> lastEntry() {
     return isEmpty() ? null : getEntry(length - 1);
   }
 
   @Override
-  public int count(@Nullable Object element) {
+  public int count(@CheckForNull Object element) {
     int index = elementSet.indexOf(element);
     return (index >= 0) ? getCount(index) : 0;
   }
@@ -112,8 +123,7 @@ final class RegularImmutableSortedMultiset<E> extends ImmutableSortedMultiset<E>
     } else if (from == 0 && to == length) {
       return this;
     } else {
-      RegularImmutableSortedSet<E> subElementSet =
-          (RegularImmutableSortedSet<E>) elementSet.getSubSet(from, to);
+      RegularImmutableSortedSet<E> subElementSet = elementSet.getSubSet(from, to);
       return new RegularImmutableSortedMultiset<E>(
           subElementSet, cumulativeCounts, offset + from, to - from);
     }

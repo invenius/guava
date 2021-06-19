@@ -16,20 +16,14 @@
 
 package com.google.common.collect;
 
-import com.google.common.base.Function;
-import com.google.common.base.Predicate;
-import com.google.common.collect.Maps.EntryTransformer;
-
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import jsinterop.annotations.JsPackage;
 import jsinterop.annotations.JsProperty;
 import jsinterop.annotations.JsType;
-
-import java.util.Arrays;
-import java.util.Deque;
-import java.util.LinkedList;
-import java.util.Map;
-import java.util.SortedMap;
-import java.util.SortedSet;
 
 /**
  * Minimal GWT emulation of {@code com.google.common.collect.Platform}.
@@ -39,6 +33,45 @@ import java.util.SortedSet;
  * @author Hayward Chan
  */
 final class Platform {
+  static <K, V> Map<K, V> newHashMapWithExpectedSize(int expectedSize) {
+    return Maps.newHashMapWithExpectedSize(expectedSize);
+  }
+
+  static <K, V> Map<K, V> newLinkedHashMapWithExpectedSize(int expectedSize) {
+    return Maps.newLinkedHashMapWithExpectedSize(expectedSize);
+  }
+
+  static <E> Set<E> newHashSetWithExpectedSize(int expectedSize) {
+    return Sets.newHashSetWithExpectedSize(expectedSize);
+  }
+
+  static <E> Set<E> newConcurrentHashSet() {
+    // GWT's ConcurrentHashMap is a wrapper around HashMap, but it rejects null keys, which matches
+    // the behaviour of the non-GWT implementation of newConcurrentHashSet().
+    // On the other hand HashSet might be better for code size if apps aren't
+    // already using Collections.newSetFromMap and ConcurrentHashMap.
+    return Collections.newSetFromMap(new ConcurrentHashMap<E, Boolean>());
+  }
+
+  static <E> Set<E> newLinkedHashSetWithExpectedSize(int expectedSize) {
+    return Sets.newLinkedHashSetWithExpectedSize(expectedSize);
+  }
+
+  /**
+   * Returns the platform preferred map implementation that preserves insertion order when used only
+   * for insertions.
+   */
+  static <K, V> Map<K, V> preservesInsertionOrderOnPutsMap() {
+    return Maps.newLinkedHashMap();
+  }
+
+  /**
+   * Returns the platform preferred set implementation that preserves insertion order when used only
+   * for insertions.
+   */
+  static <E> Set<E> preservesInsertionOrderOnAddsSet() {
+    return Sets.newLinkedHashSet();
+  }
 
   static <T> T[] newArray(T[] reference, int length) {
     T[] clone = Arrays.copyOf(reference, 0);
@@ -48,6 +81,13 @@ final class Platform {
 
   private static void resizeArray(Object array, int newSize) {
     ((NativeArray) array).setLength(newSize);
+  }
+
+  /** Equivalent to Arrays.copyOfRange(source, from, to, arrayOfType.getClass()). */
+  static <T> T[] copy(Object[] source, int from, int to, T[] arrayOfType) {
+    T[] result = newArray(arrayOfType, to - from);
+    System.arraycopy(source, from, result, 0, to - from);
+    return result;
   }
 
   // TODO(user): Move this logic to a utility class.
@@ -61,30 +101,24 @@ final class Platform {
     return mapMaker;
   }
 
-  static <K, V1, V2> SortedMap<K, V2> mapsTransformEntriesSortedMap(
-      SortedMap<K, V1> fromMap,
-      EntryTransformer<? super K, ? super V1, V2> transformer) {
-    return Maps.transformEntriesIgnoreNavigable(fromMap, transformer);
+  static int reduceIterationsIfGwt(int iterations) {
+    return iterations / 10;
   }
 
-  static <K, V> SortedMap<K, V> mapsAsMapSortedSet(
-      SortedSet<K> set, Function<? super K, V> function) {
-    return Maps.asMapSortedIgnoreNavigable(set, function);
+  static int reduceExponentIfGwt(int exponent) {
+    return exponent / 2;
   }
 
-  static <E> SortedSet<E> setsFilterSortedSet(
-      SortedSet<E> unfiltered, Predicate<? super E> predicate) {
-    return Sets.filterSortedIgnoreNavigable(unfiltered, predicate);
-  }
-
-  static <K, V> SortedMap<K, V> mapsFilterSortedMap(
-      SortedMap<K, V> unfiltered, Predicate<? super Map.Entry<K, V>> predicate) {
-    return Maps.filterSortedIgnoreNavigable(unfiltered, predicate);
-  }
-
-  static <E> Deque<E> newFastestDeque(int ignored) {
-    return new LinkedList<E>();
-  }
+  /*
+   * We will eventually disable GWT-RPC on the server side, but we'll leave it nominally enabled on
+   * the client side. There's little practical difference: If it's disabled on the server, it won't
+   * work. It's just a matter of how quickly it fails. I'm not sure if failing on the client would
+   * be better or not, but it's harder: GWT's System.getProperty reads from a different property
+   * list than Java's, so anyone who needs to reenable GWT-RPC in an emergency would have to figure
+   * out how to set both properties. It's easier to have to set only one, and it might as well be
+   * the Java property, since Guava already reads another Java property.
+   */
+  static void checkGwtRpcEnabled() {}
 
   private Platform() {}
 }

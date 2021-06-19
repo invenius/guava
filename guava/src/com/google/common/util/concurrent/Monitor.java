@@ -15,17 +15,19 @@
 package com.google.common.util.concurrent;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.util.concurrent.Internal.toNanosSaturated;
 
 import com.google.common.annotations.Beta;
 import com.google.common.annotations.GwtIncompatible;
-import com.google.common.base.Throwables;
+import com.google.common.primitives.Longs;
+import com.google.errorprone.annotations.concurrent.GuardedBy;
 import com.google.j2objc.annotations.Weak;
-
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
-
-import javax.annotation.concurrent.GuardedBy;
+import java.util.function.BooleanSupplier;
+import javax.annotation.CheckForNull;
 
 /**
  * A synchronization abstraction supporting waiting on arbitrary boolean conditions.
@@ -34,9 +36,9 @@ import javax.annotation.concurrent.GuardedBy;
  * is less error-prone and more readable than code using {@code ReentrantLock}, without significant
  * performance loss. {@code Monitor} even has the potential for performance gain by optimizing the
  * evaluation and signaling of conditions. Signaling is entirely <a
- * href="http://en.wikipedia.org/wiki/Monitor_(synchronization)#Implicit_signaling">implicit</a>.
- * By eliminating explicit signaling, this class can guarantee that only one thread is awakened when
- * a condition becomes true (no "signaling storms" due to use of {@link
+ * href="http://en.wikipedia.org/wiki/Monitor_(synchronization)#Implicit_signaling">implicit</a>. By
+ * eliminating explicit signaling, this class can guarantee that only one thread is awakened when a
+ * condition becomes true (no "signaling storms" due to use of {@link
  * java.util.concurrent.locks.Condition#signalAll Condition.signalAll}) and that no signals are lost
  * (no "hangs" due to incorrect use of {@link java.util.concurrent.locks.Condition#signal
  * Condition.signal}).
@@ -49,28 +51,32 @@ import javax.annotation.concurrent.GuardedBy;
  *
  * <p>A call to any of the <i>enter</i> methods with <b>void</b> return type should always be
  * followed immediately by a <i>try/finally</i> block to ensure that the current thread leaves the
- * monitor cleanly: <pre>   {@code
+ * monitor cleanly:
  *
- *   monitor.enter();
+ * <pre>{@code
+ * monitor.enter();
+ * try {
+ *   // do things while occupying the monitor
+ * } finally {
+ *   monitor.leave();
+ * }
+ * }</pre>
+ *
+ * <p>A call to any of the <i>enter</i> methods with <b>boolean</b> return type should always appear
+ * as the condition of an <i>if</i> statement containing a <i>try/finally</i> block to ensure that
+ * the current thread leaves the monitor cleanly:
+ *
+ * <pre>{@code
+ * if (monitor.tryEnter()) {
  *   try {
  *     // do things while occupying the monitor
  *   } finally {
  *     monitor.leave();
- *   }}</pre>
- *
- * <p>A call to any of the <i>enter</i> methods with <b>boolean</b> return type should always appear
- * as the condition of an <i>if</i> statement containing a <i>try/finally</i> block to ensure that
- * the current thread leaves the monitor cleanly: <pre>   {@code
- *
- *   if (monitor.tryEnter()) {
- *     try {
- *       // do things while occupying the monitor
- *     } finally {
- *       monitor.leave();
- *     }
- *   } else {
- *     // do other things since the monitor was not available
- *   }}</pre>
+ *   }
+ * } else {
+ *   // do other things since the monitor was not available
+ * }
+ * }</pre>
  *
  * <h2>Comparison with {@code synchronized} and {@code ReentrantLock}</h2>
  *
@@ -83,72 +89,75 @@ import javax.annotation.concurrent.GuardedBy;
  * is built into the language and runtime. But the programmer has to remember to avoid a couple of
  * common bugs: The {@code wait()} must be inside a {@code while} instead of an {@code if}, and
  * {@code notifyAll()} must be used instead of {@code notify()} because there are two different
- * logical conditions being awaited. <pre>   {@code
+ * logical conditions being awaited.
  *
- *   public class SafeBox<V> {
- *     private V value;
+ * <pre>{@code
+ * public class SafeBox<V> {
+ *   private V value;
  *
- *     public synchronized V get() throws InterruptedException {
- *       while (value == null) {
- *         wait();
- *       }
- *       V result = value;
- *       value = null;
- *       notifyAll();
- *       return result;
+ *   public synchronized V get() throws InterruptedException {
+ *     while (value == null) {
+ *       wait();
  *     }
+ *     V result = value;
+ *     value = null;
+ *     notifyAll();
+ *     return result;
+ *   }
  *
- *     public synchronized void set(V newValue) throws InterruptedException {
- *       while (value != null) {
- *         wait();
- *       }
- *       value = newValue;
- *       notifyAll();
+ *   public synchronized void set(V newValue) throws InterruptedException {
+ *     while (value != null) {
+ *       wait();
  *     }
- *   }}</pre>
+ *     value = newValue;
+ *     notifyAll();
+ *   }
+ * }
+ * }</pre>
  *
  * <h3>{@code ReentrantLock}</h3>
  *
  * <p>This version is much more verbose than the {@code synchronized} version, and still suffers
- * from the need for the programmer to remember to use {@code while} instead of {@code if}.
- * However, one advantage is that we can introduce two separate {@code Condition} objects, which
- * allows us to use {@code signal()} instead of {@code signalAll()}, which may be a performance
- * benefit. <pre>   {@code
+ * from the need for the programmer to remember to use {@code while} instead of {@code if}. However,
+ * one advantage is that we can introduce two separate {@code Condition} objects, which allows us to
+ * use {@code signal()} instead of {@code signalAll()}, which may be a performance benefit.
  *
- *   public class SafeBox<V> {
- *     private final ReentrantLock lock = new ReentrantLock();
- *     private final Condition valuePresent = lock.newCondition();
- *     private final Condition valueAbsent = lock.newCondition();
- *     private V value;
+ * <pre>{@code
+ * public class SafeBox<V> {
+ *   private V value;
+ *   private final ReentrantLock lock = new ReentrantLock();
+ *   private final Condition valuePresent = lock.newCondition();
+ *   private final Condition valueAbsent = lock.newCondition();
  *
- *     public V get() throws InterruptedException {
- *       lock.lock();
- *       try {
- *         while (value == null) {
- *           valuePresent.await();
- *         }
- *         V result = value;
- *         value = null;
- *         valueAbsent.signal();
- *         return result;
- *       } finally {
- *         lock.unlock();
+ *   public V get() throws InterruptedException {
+ *     lock.lock();
+ *     try {
+ *       while (value == null) {
+ *         valuePresent.await();
  *       }
+ *       V result = value;
+ *       value = null;
+ *       valueAbsent.signal();
+ *       return result;
+ *     } finally {
+ *       lock.unlock();
  *     }
+ *   }
  *
- *     public void set(V newValue) throws InterruptedException {
- *       lock.lock();
- *       try {
- *         while (value != null) {
- *           valueAbsent.await();
- *         }
- *         value = newValue;
- *         valuePresent.signal();
- *       } finally {
- *         lock.unlock();
+ *   public void set(V newValue) throws InterruptedException {
+ *     lock.lock();
+ *     try {
+ *       while (value != null) {
+ *         valueAbsent.await();
  *       }
+ *       value = newValue;
+ *       valuePresent.signal();
+ *     } finally {
+ *       lock.unlock();
  *     }
- *   }}</pre>
+ *   }
+ * }
+ * }</pre>
  *
  * <h3>{@code Monitor}</h3>
  *
@@ -156,42 +165,36 @@ import javax.annotation.concurrent.GuardedBy;
  * verbosity, and more, from the {@code get} and {@code set} methods. {@code Monitor} implements the
  * same efficient signaling as we had to hand-code in the {@code ReentrantLock} version above.
  * Finally, the programmer no longer has to hand-code the wait loop, and therefore doesn't have to
- * remember to use {@code while} instead of {@code if}. <pre>   {@code
+ * remember to use {@code while} instead of {@code if}.
  *
- *   public class SafeBox<V> {
- *     private final Monitor monitor = new Monitor();
- *     private final Monitor.Guard valuePresent = new Monitor.Guard(monitor) {
- *       public boolean isSatisfied() {
- *         return value != null;
- *       }
- *     };
- *     private final Monitor.Guard valueAbsent = new Monitor.Guard(monitor) {
- *       public boolean isSatisfied() {
- *         return value == null;
- *       }
- *     };
- *     private V value;
+ * <pre>{@code
+ * public class SafeBox<V> {
+ *   private V value;
+ *   private final Monitor monitor = new Monitor();
+ *   private final Monitor.Guard valuePresent = monitor.newGuard(() -> value != null);
+ *   private final Monitor.Guard valueAbsent = monitor.newGuard(() -> value == null);
  *
- *     public V get() throws InterruptedException {
- *       monitor.enterWhen(valuePresent);
- *       try {
- *         V result = value;
- *         value = null;
- *         return result;
- *       } finally {
- *         monitor.leave();
- *       }
+ *   public V get() throws InterruptedException {
+ *     monitor.enterWhen(valuePresent);
+ *     try {
+ *       V result = value;
+ *       value = null;
+ *       return result;
+ *     } finally {
+ *       monitor.leave();
  *     }
+ *   }
  *
- *     public void set(V newValue) throws InterruptedException {
- *       monitor.enterWhen(valueAbsent);
- *       try {
- *         value = newValue;
- *       } finally {
- *         monitor.leave();
- *       }
+ *   public void set(V newValue) throws InterruptedException {
+ *     monitor.enterWhen(valueAbsent);
+ *     try {
+ *       value = newValue;
+ *     } finally {
+ *       monitor.leave();
  *     }
- *   }}</pre>
+ *   }
+ * }
+ * }</pre>
  *
  * @author Justin T. Sampson
  * @author Martin Buchholz
@@ -199,6 +202,8 @@ import javax.annotation.concurrent.GuardedBy;
  */
 @Beta
 @GwtIncompatible
+@SuppressWarnings("GuardedBy") // TODO(b/35466881): Fix or suppress.
+@ElementTypesAreNonnullByDefault
 public final class Monitor {
   // TODO(user): Use raw LockSupport or AbstractQueuedSynchronizer instead of ReentrantLock.
   // TODO(user): "Port" jsr166 tests for ReentrantLock.
@@ -247,33 +252,32 @@ public final class Monitor {
 
   /*
    * One of the key challenges of this class is to prevent lost signals, while trying hard to
-   * minimize unnecessary signals.  One simple and correct algorithm is to signal some other
-   * waiter with a satisfied guard (if one exists) whenever any thread occupying the monitor
-   * exits the monitor, either by unlocking all of its held locks, or by starting to wait for a
-   * guard.  This includes exceptional exits, so all control paths involving signalling must be
-   * protected by a finally block.
+   * minimize unnecessary signals. One simple and correct algorithm is to signal some other waiter
+   * with a satisfied guard (if one exists) whenever any thread occupying the monitor exits the
+   * monitor, either by unlocking all of its held locks, or by starting to wait for a guard. This
+   * includes exceptional exits, so all control paths involving signalling must be protected by a
+   * finally block.
    *
-   * Further optimizations of this algorithm become increasingly subtle.  A wait that terminates
-   * without the guard being satisfied (due to timeout, but not interrupt) can then immediately
-   * exit the monitor without signalling.  If it timed out without being signalled, it does not
-   * need to "pass on" the signal to another thread.  If it *was* signalled, then its guard must
-   * have been satisfied at the time of signal, and has since been modified by some other thread
-   * to be non-satisfied before reacquiring the lock, and that other thread takes over the
-   * responsibility of signaling the next waiter.
+   * Further optimizations of this algorithm become increasingly subtle. A wait that terminates
+   * without the guard being satisfied (due to timeout, but not interrupt) can then immediately exit
+   * the monitor without signalling. If it timed out without being signalled, it does not need to
+   * "pass on" the signal to another thread. If it *was* signalled, then its guard must have been
+   * satisfied at the time of signal, and has since been modified by some other thread to be
+   * non-satisfied before reacquiring the lock, and that other thread takes over the responsibility
+   * of signaling the next waiter.
    *
-   * Unlike the underlying Condition, if we are not careful, an interrupt *can* cause a signal to
-   * be lost, because the signal may be sent to a condition whose sole waiter has just been
+   * Unlike the underlying Condition, if we are not careful, an interrupt *can* cause a signal to be
+   * lost, because the signal may be sent to a condition whose sole waiter has just been
    * interrupted.
    *
-   * Imagine a monitor with multiple guards.  A thread enters the monitor, satisfies all the
-   * guards, and leaves, calling signalNextWaiter.  With traditional locks and conditions, all
-   * the conditions need to be signalled because it is not known which if any of them have
-   * waiters (and hasWaiters can't be used reliably because of a check-then-act race).  With our
-   * Monitor guards, we only signal the first active guard that is satisfied.  But the
-   * corresponding thread may have already been interrupted and is waiting to reacquire the lock
-   * while still registered in activeGuards, in which case the signal is a no-op, and the
-   * bigger-picture signal is lost unless interrupted threads take special action by
-   * participating in the signal-passing game.
+   * Imagine a monitor with multiple guards. A thread enters the monitor, satisfies all the guards,
+   * and leaves, calling signalNextWaiter. With traditional locks and conditions, all the conditions
+   * need to be signalled because it is not known which if any of them have waiters (and hasWaiters
+   * can't be used reliably because of a check-then-act race). With our Monitor guards, we only
+   * signal the first active guard that is satisfied. But the corresponding thread may have already
+   * been interrupted and is waiting to reacquire the lock while still registered in activeGuards,
+   * in which case the signal is a no-op, and the bigger-picture signal is lost unless interrupted
+   * threads take special action by participating in the signal-passing game.
    */
 
   /*
@@ -282,10 +286,10 @@ public final class Monitor {
    *   Long.MIN_VALUE or Long.MAX_VALUE.
    * - Favor responding to interrupts over timeouts.
    * - System.nanoTime() is expensive enough that we want to call it the minimum required number of
-   *   times, typically once before invoking a blocking method.  This often requires keeping track
-   *   of the first time in a method that nanoTime() has been invoked, for which the special value
-   *   0L is reserved to mean "uninitialized".  If timeout is non-positive, then nanoTime need
-   *   never be called.
+   *   times, typically once before invoking a blocking method. This often requires keeping track of
+   *   the first time in a method that nanoTime() has been invoked, for which the special value 0L
+   *   is reserved to mean "uninitialized". If timeout is non-positive, then nanoTime need never be
+   *   called.
    * - Keep behavior of fair and non-fair instances consistent.
    */
 
@@ -311,6 +315,7 @@ public final class Monitor {
 
     /** The next active guard */
     @GuardedBy("monitor.lock")
+    @CheckForNull
     Guard next;
 
     protected Guard(Monitor monitor) {
@@ -326,14 +331,10 @@ public final class Monitor {
     public abstract boolean isSatisfied();
   }
 
-  /**
-   * Whether this monitor is fair.
-   */
+  /** Whether this monitor is fair. */
   private final boolean fair;
 
-  /**
-   * The lock underlying this monitor.
-   */
+  /** The lock underlying this monitor. */
   private final ReentrantLock lock;
 
   /**
@@ -341,6 +342,7 @@ public final class Monitor {
    * A linked list threaded through the Guard.next field.
    */
   @GuardedBy("lock")
+  @CheckForNull
   private Guard activeGuards = null;
 
   /**
@@ -355,7 +357,7 @@ public final class Monitor {
    * Creates a monitor with the given ordering policy.
    *
    * @param fair whether this monitor should use a fair ordering policy rather than a non-fair (but
-   *        fast) one
+   *     fast) one
    */
   public Monitor(boolean fair) {
     this.fair = fair;
@@ -363,19 +365,35 @@ public final class Monitor {
   }
 
   /**
-   * Enters this monitor. Blocks indefinitely.
+   * Creates a new {@linkplain Guard guard} for this monitor.
+   *
+   * @param isSatisfied the new guard's boolean condition (see {@link Guard#isSatisfied
+   *     isSatisfied()})
+   * @since 21.0
    */
+  public Guard newGuard(final BooleanSupplier isSatisfied) {
+    checkNotNull(isSatisfied, "isSatisfied");
+    return new Guard(this) {
+      @Override
+      public boolean isSatisfied() {
+        return isSatisfied.getAsBoolean();
+      }
+    };
+  }
+
+  /** Enters this monitor. Blocks indefinitely. */
   public void enter() {
     lock.lock();
   }
 
   /**
-   * Enters this monitor. Blocks indefinitely, but may be interrupted.
+   * Enters this monitor. Blocks at most the given time.
    *
-   * @throws InterruptedException if interrupted while waiting
+   * @return whether the monitor was entered
+   * @since 28.0
    */
-  public void enterInterruptibly() throws InterruptedException {
-    lock.lockInterruptibly();
+  public boolean enter(Duration time) {
+    return enter(toNanosSaturated(time), TimeUnit.NANOSECONDS);
   }
 
   /**
@@ -383,6 +401,7 @@ public final class Monitor {
    *
    * @return whether the monitor was entered
    */
+  @SuppressWarnings("GoodTime") // should accept a java.time.Duration
   public boolean enter(long time, TimeUnit unit) {
     final long timeoutNanos = toSafeNanos(time, unit);
     final ReentrantLock lock = this.lock;
@@ -408,11 +427,32 @@ public final class Monitor {
   }
 
   /**
+   * Enters this monitor. Blocks indefinitely, but may be interrupted.
+   *
+   * @throws InterruptedException if interrupted while waiting
+   */
+  public void enterInterruptibly() throws InterruptedException {
+    lock.lockInterruptibly();
+  }
+
+  /**
+   * Enters this monitor. Blocks at most the given time, and may be interrupted.
+   *
+   * @return whether the monitor was entered
+   * @throws InterruptedException if interrupted while waiting
+   * @since 28.0
+   */
+  public boolean enterInterruptibly(Duration time) throws InterruptedException {
+    return enterInterruptibly(toNanosSaturated(time), TimeUnit.NANOSECONDS);
+  }
+
+  /**
    * Enters this monitor. Blocks at most the given time, and may be interrupted.
    *
    * @return whether the monitor was entered
    * @throws InterruptedException if interrupted while waiting
    */
+  @SuppressWarnings("GoodTime") // should accept a java.time.Duration
   public boolean enterInterruptibly(long time, TimeUnit unit) throws InterruptedException {
     return lock.tryLock(time, unit);
   }
@@ -455,27 +495,16 @@ public final class Monitor {
   }
 
   /**
-   * Enters this monitor when the guard is satisfied. Blocks indefinitely.
+   * Enters this monitor when the guard is satisfied. Blocks at most the given time, including both
+   * the time to acquire the lock and the time to wait for the guard to be satisfied, and may be
+   * interrupted.
+   *
+   * @return whether the monitor was entered, which guarantees that the guard is now satisfied
+   * @throws InterruptedException if interrupted while waiting
+   * @since 28.0
    */
-  public void enterWhenUninterruptibly(Guard guard) {
-    if (guard.monitor != this) {
-      throw new IllegalMonitorStateException();
-    }
-    final ReentrantLock lock = this.lock;
-    boolean signalBeforeWaiting = lock.isHeldByCurrentThread();
-    lock.lock();
-
-    boolean satisfied = false;
-    try {
-      if (!guard.isSatisfied()) {
-        awaitUninterruptibly(guard, signalBeforeWaiting);
-      }
-      satisfied = true;
-    } finally {
-      if (!satisfied) {
-        leave();
-      }
-    }
+  public boolean enterWhen(Guard guard, Duration time) throws InterruptedException {
+    return enterWhen(guard, toNanosSaturated(time), TimeUnit.NANOSECONDS);
   }
 
   /**
@@ -486,6 +515,7 @@ public final class Monitor {
    * @return whether the monitor was entered, which guarantees that the guard is now satisfied
    * @throws InterruptedException if interrupted while waiting
    */
+  @SuppressWarnings("GoodTime") // should accept a java.time.Duration
   public boolean enterWhen(Guard guard, long time, TimeUnit unit) throws InterruptedException {
     final long timeoutNanos = toSafeNanos(time, unit);
     if (guard.monitor != this) {
@@ -537,12 +567,46 @@ public final class Monitor {
     }
   }
 
+  /** Enters this monitor when the guard is satisfied. Blocks indefinitely. */
+  public void enterWhenUninterruptibly(Guard guard) {
+    if (guard.monitor != this) {
+      throw new IllegalMonitorStateException();
+    }
+    final ReentrantLock lock = this.lock;
+    boolean signalBeforeWaiting = lock.isHeldByCurrentThread();
+    lock.lock();
+
+    boolean satisfied = false;
+    try {
+      if (!guard.isSatisfied()) {
+        awaitUninterruptibly(guard, signalBeforeWaiting);
+      }
+      satisfied = true;
+    } finally {
+      if (!satisfied) {
+        leave();
+      }
+    }
+  }
+
   /**
-   * Enters this monitor when the guard is satisfied. Blocks at most the given time, including
-   * both the time to acquire the lock and the time to wait for the guard to be satisfied.
+   * Enters this monitor when the guard is satisfied. Blocks at most the given time, including both
+   * the time to acquire the lock and the time to wait for the guard to be satisfied.
+   *
+   * @return whether the monitor was entered, which guarantees that the guard is now satisfied
+   * @since 28.0
+   */
+  public boolean enterWhenUninterruptibly(Guard guard, Duration time) {
+    return enterWhenUninterruptibly(guard, toNanosSaturated(time), TimeUnit.NANOSECONDS);
+  }
+
+  /**
+   * Enters this monitor when the guard is satisfied. Blocks at most the given time, including both
+   * the time to acquire the lock and the time to wait for the guard to be satisfied.
    *
    * @return whether the monitor was entered, which guarantees that the guard is now satisfied
    */
+  @SuppressWarnings("GoodTime") // should accept a java.time.Duration
   public boolean enterWhenUninterruptibly(Guard guard, long time, TimeUnit unit) {
     final long timeoutNanos = toSafeNanos(time, unit);
     if (guard.monitor != this) {
@@ -604,8 +668,8 @@ public final class Monitor {
   }
 
   /**
-   * Enters this monitor if the guard is satisfied. Blocks indefinitely acquiring the lock, but
-   * does not wait for the guard to be satisfied.
+   * Enters this monitor if the guard is satisfied. Blocks indefinitely acquiring the lock, but does
+   * not wait for the guard to be satisfied.
    *
    * @return whether the monitor was entered, which guarantees that the guard is now satisfied
    */
@@ -615,6 +679,42 @@ public final class Monitor {
     }
     final ReentrantLock lock = this.lock;
     lock.lock();
+
+    boolean satisfied = false;
+    try {
+      return satisfied = guard.isSatisfied();
+    } finally {
+      if (!satisfied) {
+        lock.unlock();
+      }
+    }
+  }
+
+  /**
+   * Enters this monitor if the guard is satisfied. Blocks at most the given time acquiring the
+   * lock, but does not wait for the guard to be satisfied.
+   *
+   * @return whether the monitor was entered, which guarantees that the guard is now satisfied
+   * @since 28.0
+   */
+  public boolean enterIf(Guard guard, Duration time) {
+    return enterIf(guard, toNanosSaturated(time), TimeUnit.NANOSECONDS);
+  }
+
+  /**
+   * Enters this monitor if the guard is satisfied. Blocks at most the given time acquiring the
+   * lock, but does not wait for the guard to be satisfied.
+   *
+   * @return whether the monitor was entered, which guarantees that the guard is now satisfied
+   */
+  @SuppressWarnings("GoodTime") // should accept a java.time.Duration
+  public boolean enterIf(Guard guard, long time, TimeUnit unit) {
+    if (guard.monitor != this) {
+      throw new IllegalMonitorStateException();
+    }
+    if (!enter(time, unit)) {
+      return false;
+    }
 
     boolean satisfied = false;
     try {
@@ -652,26 +752,13 @@ public final class Monitor {
 
   /**
    * Enters this monitor if the guard is satisfied. Blocks at most the given time acquiring the
-   * lock, but does not wait for the guard to be satisfied.
+   * lock, but does not wait for the guard to be satisfied, and may be interrupted.
    *
    * @return whether the monitor was entered, which guarantees that the guard is now satisfied
+   * @since 28.0
    */
-  public boolean enterIf(Guard guard, long time, TimeUnit unit) {
-    if (guard.monitor != this) {
-      throw new IllegalMonitorStateException();
-    }
-    if (!enter(time, unit)) {
-      return false;
-    }
-
-    boolean satisfied = false;
-    try {
-      return satisfied = guard.isSatisfied();
-    } finally {
-      if (!satisfied) {
-        lock.unlock();
-      }
-    }
+  public boolean enterIfInterruptibly(Guard guard, Duration time) throws InterruptedException {
+    return enterIfInterruptibly(guard, toNanosSaturated(time), TimeUnit.NANOSECONDS);
   }
 
   /**
@@ -680,6 +767,7 @@ public final class Monitor {
    *
    * @return whether the monitor was entered, which guarantees that the guard is now satisfied
    */
+  @SuppressWarnings("GoodTime") // should accept a java.time.Duration
   public boolean enterIfInterruptibly(Guard guard, long time, TimeUnit unit)
       throws InterruptedException {
     if (guard.monitor != this) {
@@ -728,8 +816,8 @@ public final class Monitor {
   }
 
   /**
-   * Waits for the guard to be satisfied. Waits indefinitely, but may be interrupted. May be
-   * called only by a thread currently occupying this monitor.
+   * Waits for the guard to be satisfied. Waits indefinitely, but may be interrupted. May be called
+   * only by a thread currently occupying this monitor.
    *
    * @throws InterruptedException if interrupted while waiting
    */
@@ -740,6 +828,40 @@ public final class Monitor {
     if (!guard.isSatisfied()) {
       await(guard, true);
     }
+  }
+
+  /**
+   * Waits for the guard to be satisfied. Waits at most the given time, and may be interrupted. May
+   * be called only by a thread currently occupying this monitor.
+   *
+   * @return whether the guard is now satisfied
+   * @throws InterruptedException if interrupted while waiting
+   * @since 28.0
+   */
+  public boolean waitFor(Guard guard, Duration time) throws InterruptedException {
+    return waitFor(guard, toNanosSaturated(time), TimeUnit.NANOSECONDS);
+  }
+
+  /**
+   * Waits for the guard to be satisfied. Waits at most the given time, and may be interrupted. May
+   * be called only by a thread currently occupying this monitor.
+   *
+   * @return whether the guard is now satisfied
+   * @throws InterruptedException if interrupted while waiting
+   */
+  @SuppressWarnings("GoodTime") // should accept a java.time.Duration
+  public boolean waitFor(Guard guard, long time, TimeUnit unit) throws InterruptedException {
+    final long timeoutNanos = toSafeNanos(time, unit);
+    if (!((guard.monitor == this) & lock.isHeldByCurrentThread())) {
+      throw new IllegalMonitorStateException();
+    }
+    if (guard.isSatisfied()) {
+      return true;
+    }
+    if (Thread.interrupted()) {
+      throw new InterruptedException();
+    }
+    return awaitNanos(guard, timeoutNanos, true);
   }
 
   /**
@@ -756,24 +878,14 @@ public final class Monitor {
   }
 
   /**
-   * Waits for the guard to be satisfied. Waits at most the given time, and may be interrupted.
-   * May be called only by a thread currently occupying this monitor.
+   * Waits for the guard to be satisfied. Waits at most the given time. May be called only by a
+   * thread currently occupying this monitor.
    *
    * @return whether the guard is now satisfied
-   * @throws InterruptedException if interrupted while waiting
+   * @since 28.0
    */
-  public boolean waitFor(Guard guard, long time, TimeUnit unit) throws InterruptedException {
-    final long timeoutNanos = toSafeNanos(time, unit);
-    if (!((guard.monitor == this) & lock.isHeldByCurrentThread())) {
-      throw new IllegalMonitorStateException();
-    }
-    if (guard.isSatisfied()) {
-      return true;
-    }
-    if (Thread.interrupted()) {
-      throw new InterruptedException();
-    }
-    return awaitNanos(guard, timeoutNanos, true);
+  public boolean waitForUninterruptibly(Guard guard, Duration time) {
+    return waitForUninterruptibly(guard, toNanosSaturated(time), TimeUnit.NANOSECONDS);
   }
 
   /**
@@ -782,6 +894,7 @@ public final class Monitor {
    *
    * @return whether the guard is now satisfied
    */
+  @SuppressWarnings("GoodTime") // should accept a java.time.Duration
   public boolean waitForUninterruptibly(Guard guard, long time, TimeUnit unit) {
     final long timeoutNanos = toSafeNanos(time, unit);
     if (!((guard.monitor == this) & lock.isHeldByCurrentThread())) {
@@ -813,9 +926,7 @@ public final class Monitor {
     }
   }
 
-  /**
-   * Leaves this monitor. May be called only by a thread currently occupying this monitor.
-   */
+  /** Leaves this monitor. May be called only by a thread currently occupying this monitor. */
   public void leave() {
     final ReentrantLock lock = this.lock;
     try {
@@ -828,9 +939,7 @@ public final class Monitor {
     }
   }
 
-  /**
-   * Returns whether this monitor is using a fair ordering policy.
-   */
+  /** Returns whether this monitor is using a fair ordering policy. */
   public boolean isFair() {
     return fair;
   }
@@ -924,14 +1033,12 @@ public final class Monitor {
    */
   private static long toSafeNanos(long time, TimeUnit unit) {
     long timeoutNanos = unit.toNanos(time);
-    return (timeoutNanos <= 0L)
-        ? 0L
-        : (timeoutNanos > (Long.MAX_VALUE / 4) * 3) ? (Long.MAX_VALUE / 4) * 3 : timeoutNanos;
+    return Longs.constrainToRange(timeoutNanos, 0L, (Long.MAX_VALUE / 4) * 3);
   }
 
   /**
-   * Returns System.nanoTime() unless the timeout has already elapsed.
-   * Returns 0L if and only if the timeout has already elapsed.
+   * Returns System.nanoTime() unless the timeout has already elapsed. Returns 0L if and only if the
+   * timeout has already elapsed.
    */
   private static long initNanoTime(long timeoutNanos) {
     if (timeoutNanos <= 0L) {
@@ -960,26 +1067,26 @@ public final class Monitor {
   /**
    * Signals some other thread waiting on a satisfied guard, if one exists.
    *
-   * We manage calls to this method carefully, to signal only when necessary, but never losing a
-   * signal, which is the classic problem of this kind of concurrency construct.  We must signal if
+   * <p>We manage calls to this method carefully, to signal only when necessary, but never losing a
+   * signal, which is the classic problem of this kind of concurrency construct. We must signal if
    * the current thread is about to relinquish the lock and may have changed the state protected by
    * the monitor, thereby causing some guard to be satisfied.
    *
-   * In addition, any thread that has been signalled when its guard was satisfied acquires the
-   * responsibility of signalling the next thread when it again relinquishes the lock.  Unlike a
+   * <p>In addition, any thread that has been signalled when its guard was satisfied acquires the
+   * responsibility of signalling the next thread when it again relinquishes the lock. Unlike a
    * normal Condition, there is no guarantee that an interrupted thread has not been signalled,
-   * since the concurrency control must manage multiple Conditions.  So this method must generally
-   * be called when waits are interrupted.
+   * since the concurrency control must manage multiple Conditions. So this method must generally be
+   * called when waits are interrupted.
    *
-   * On the other hand, if a signalled thread wakes up to discover that its guard is still not
-   * satisfied, it does *not* need to call this method before returning to wait.  This can only
+   * <p>On the other hand, if a signalled thread wakes up to discover that its guard is still not
+   * satisfied, it does *not* need to call this method before returning to wait. This can only
    * happen due to spurious wakeup (ignorable) or another thread acquiring the lock before the
-   * current thread can and returning the guard to the unsatisfied state.  In the latter case the
+   * current thread can and returning the guard to the unsatisfied state. In the latter case the
    * other thread (last thread modifying the state protected by the monitor) takes over the
    * responsibility of signalling the next waiter.
    *
-   * This method must not be called from within a beginWaitingFor/endWaitingFor block, or else the
-   * current thread's guard might be mistakenly signalled, leading to a lost signal.
+   * <p>This method must not be called from within a beginWaitingFor/endWaitingFor block, or else
+   * the current thread's guard might be mistakenly signalled, leading to a lost signal.
    */
   @GuardedBy("lock")
   private void signalNextWaiter() {
@@ -993,25 +1100,25 @@ public final class Monitor {
 
   /**
    * Exactly like signalNextWaiter, but caller guarantees that guardToSkip need not be considered,
-   * because caller has previously checked that guardToSkip.isSatisfied() returned false.
-   * An optimization for the case that guardToSkip.isSatisfied() may be expensive.
+   * because caller has previously checked that guardToSkip.isSatisfied() returned false. An
+   * optimization for the case that guardToSkip.isSatisfied() may be expensive.
    *
-   * We decided against using this method, since in practice, isSatisfied() is likely to be very
-   * cheap (typically one field read).  Resurrect this method if you find that not to be true.
+   * <p>We decided against using this method, since in practice, isSatisfied() is likely to be very
+   * cheap (typically one field read). Resurrect this method if you find that not to be true.
    */
-//   @GuardedBy("lock")
-//   private void signalNextWaiterSkipping(Guard guardToSkip) {
-//     for (Guard guard = activeGuards; guard != null; guard = guard.next) {
-//       if (guard != guardToSkip && isSatisfied(guard)) {
-//         guard.condition.signal();
-//         break;
-//       }
-//     }
-//   }
+  //   @GuardedBy("lock")
+  //   private void signalNextWaiterSkipping(Guard guardToSkip) {
+  //     for (Guard guard = activeGuards; guard != null; guard = guard.next) {
+  //       if (guard != guardToSkip && isSatisfied(guard)) {
+  //         guard.condition.signal();
+  //         break;
+  //       }
+  //     }
+  //   }
 
   /**
-   * Exactly like guard.isSatisfied(), but in addition signals all waiting threads in the
-   * (hopefully unlikely) event that isSatisfied() throws.
+   * Exactly like guard.isSatisfied(), but in addition signals all waiting threads in the (hopefully
+   * unlikely) event that isSatisfied() throws.
    */
   @GuardedBy("lock")
   private boolean isSatisfied(Guard guard) {
@@ -1019,13 +1126,11 @@ public final class Monitor {
       return guard.isSatisfied();
     } catch (Throwable throwable) {
       signalAllWaiters();
-      throw Throwables.propagate(throwable);
+      throw throwable;
     }
   }
 
-  /**
-   * Signals all threads waiting on guards.
-   */
+  /** Signals all threads waiting on guards. */
   @GuardedBy("lock")
   private void signalAllWaiters() {
     for (Guard guard = activeGuards; guard != null; guard = guard.next) {
@@ -1033,9 +1138,7 @@ public final class Monitor {
     }
   }
 
-  /**
-   * Records that the current thread is about to wait on the specified guard.
-   */
+  /** Records that the current thread is about to wait on the specified guard. */
   @GuardedBy("lock")
   private void beginWaitingFor(Guard guard) {
     int waiters = guard.waiterCount++;
@@ -1046,9 +1149,7 @@ public final class Monitor {
     }
   }
 
-  /**
-   * Records that the current thread is no longer waiting on the specified guard.
-   */
+  /** Records that the current thread is no longer waiting on the specified guard. */
   @GuardedBy("lock")
   private void endWaitingFor(Guard guard) {
     int waiters = --guard.waiterCount;
@@ -1069,9 +1170,9 @@ public final class Monitor {
   }
 
   /*
-   * Methods that loop waiting on a guard's condition until the guard is satisfied, while
-   * recording this fact so that other threads know to check our guard and signal us.
-   * It's caller's responsibility to ensure that the guard is *not* currently satisfied.
+   * Methods that loop waiting on a guard's condition until the guard is satisfied, while recording
+   * this fact so that other threads know to check our guard and signal us. It's caller's
+   * responsibility to ensure that the guard is *not* currently satisfied.
    */
 
   @GuardedBy("lock")
@@ -1104,9 +1205,7 @@ public final class Monitor {
     }
   }
 
-  /**
-   * Caller should check before calling that guard is not satisfied.
-   */
+  /** Caller should check before calling that guard is not satisfied. */
   @GuardedBy("lock")
   private boolean awaitNanos(Guard guard, long nanos, boolean signalBeforeWaiting)
       throws InterruptedException {
